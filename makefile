@@ -1,5 +1,5 @@
 CC = gcc
-FLAGS = -Wall -Wextra -pedantic -g
+FLAGS = -Wall -Wextra -pedantic -g -lm
 
 .PHONY: bin test clean
 
