@@ -4,6 +4,7 @@
  *  
  *  This is a simple generic dynanic hashmap implementation in C.
  *  It uses separate chaining to handle collisions.
+ *  It resize automatically when the load balance is too high or too low (const in hashmap.c)
  *
  *  ---------- Features ---------
  *  - Generic : can store any type of key-value pairs
@@ -11,7 +12,7 @@
  *  - Customizable : you can provide custom functions to handle memory allocation, deallocation, comparison and hash functions
  *  - Print : you can print the hashmap with custom print functions
  *  - Destroy : you can destroy the hashmap and all the key-value pairs with custom destroy functions
- *
+ *  
  *  -------- Limitations --------
  *  I would not recommend using this hashmap for large datasets, as it is not optimized for speed.
  *  Cause it uses a simple linked list to handle collisions, it is not the best choice for large datasets.
@@ -95,6 +96,7 @@ void* hashmap_get(hashmap_t *hm, const void* key);
 /// @param value The value to add
 /// @return A pointer to the added value, a pointer to the existing value or NULL if an error occured
 /// @note If the key already exists, it will NOT REPLACE the old value ! (but return the old value)
+/// @complexity O(1)
 void* hashmap_add(hashmap_t *hm, const void* key, const void* value);
 
 /// @brief Remove a key-value pair from the hashmap
@@ -102,6 +104,7 @@ void* hashmap_add(hashmap_t *hm, const void* key, const void* value);
 /// @param key The key to remove
 /// @return true if the key was removed, false otherwise (not found)
 /// @note AFTER removing the key, the hashmap will automatically shrink if the load balance is too low
+/// @complexity ~O(1) -> O(n) where n is the number of same hash keys
 bool hashmap_remove(hashmap_t *hm, const void *key);
 
 /// @brief Print the hashmap : some informations about the hashmap and all the key-value pairs

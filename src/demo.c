@@ -2,9 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-//temp
-#include <unistd.h>
-
 #include "hashmap/hashmap.h"
 
 typedef struct {

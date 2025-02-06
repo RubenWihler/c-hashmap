@@ -136,7 +136,7 @@ void* hashmap_add(hashmap_t *hm, const void* key, const void* value)
     if(node == NULL) return (hm->count--, NULL);//decrement count (mais pas besoin de shrink)
 
     //on ajoute le noeud en tete de la liste chainée
-    //(pour ne pas avoir a iterer sur la liste pour ajouter un element)
+    //(on rest a O(1) pour l'ajout)
     node->next = hm->table[index];
     hm->table[index] = node;
 
