@@ -1,7 +1,5 @@
 # C Generic Hashmap
 
-[![License](https://img.shields.io/github/license/RubenWihler/c-hashmap)]
-
 Une implémentation de hashmap générique dynamique en C.
 Elle est basée sur une table de hachage et utilise des listes chaînées pour gérer les collisions.
 
