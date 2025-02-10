@@ -17,6 +17,10 @@ Le fichier `src/hashmap.h` contient des explications détaillées sur l'utilisat
 - [x] Afficher les éléments de la hashmap (fonction de print personnalisée)
 - [x] Libérer la hashmap
 
+- [] Faire en sorte que la hashmap soit thread-safe
+- [] Donner un stream à la fonction de print pour afficher les éléments
+- [] Ajouter des tests unitaires
+
 ## 📦 Utilisation
 
 Le fichier `/src/demo.c` contient un exemple complet d'utilisation de la hashmap.
