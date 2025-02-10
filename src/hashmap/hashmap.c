@@ -16,19 +16,21 @@ struct _hashmap_t {
     size_t key_size;
     size_t value_size;
     size_t count;
+
+    //settings
+    float load_balance_threshold_min;
+    float load_balance_threshold_max;
+
+    //functions
+    hash_fn_t fn_hash;
+    compare_fn_t fn_compare;
+    destroy_fn_t fn_destroy_key;
+    destroy_fn_t fn_destroy_value;
+    alloc_copy_fn_t fn_alloc_copy_key;
+    alloc_copy_fn_t fn_alloc_copy_value;
+
     node_t** table;
-
-    hash_fn_t hash_fn;
-    compare_fn_t compare_fn;
-    destroy_fn_t key_destroy_fn;
-    destroy_fn_t value_destroy_fn;
-    alloc_copy_fn_t key_alloc_copy_fn;
-    alloc_copy_fn_t value_alloc_copy_fn;
 };
-
-static const size_t minimal_capacity = 2;
-static const float min_load_balance_threshold = 0.25f;
-static const float max_load_balance_threshold = 0.75f;
 
 static inline size_t get_auto_growth_new_capacity(const hashmap_t *hm)
 { return hm->capacity + (hm->capacity >> 1); } //+50%
@@ -46,9 +48,9 @@ static node_t* node_create(const hashmap_t *hm, const void *key, const void *val
 static void node_destroy(const hashmap_t *hm, node_t *node);
 
 //default functions
-static void* default_alloc_copy_fn(const void *element, const size_t size);
-static const compare_fn_t default_compare_fn = memcmp;
-static const destroy_fn_t default_destroy_fn = free;
+static void* default_fn_alloc_copy(const void *element, const size_t size);
+static const compare_fn_t default_fn_compare = memcmp;
+static const destroy_fn_t default_fn_destroy = free;
 
 hashmap_t* hashmap_create(size_t initial_capacity, hash_fn_t hash_fn, 
                           const size_t key_size, const size_t value_size)
@@ -56,7 +58,8 @@ hashmap_t* hashmap_create(size_t initial_capacity, hash_fn_t hash_fn,
     assert(key_size > 0 && value_size > 0);
 
     //setting default values
-    if(initial_capacity < minimal_capacity) initial_capacity = minimal_capacity;
+    if(initial_capacity == 0) initial_capacity = HASHMAP_DEFAULT_CAPACITY;
+    if(initial_capacity < HASHMAP_MINIMAL_CAPACITY) initial_capacity = HASHMAP_MINIMAL_CAPACITY;
     if(hash_fn == NULL) hash_fn = HASH_FUNC_DEFAULT;
 
     //allocation pour la hashmap
@@ -68,14 +71,17 @@ hashmap_t* hashmap_create(size_t initial_capacity, hash_fn_t hash_fn,
     hashmap->key_size = key_size;
     hashmap->value_size = value_size;
     hashmap->count = 0;
-    hashmap->hash_fn = hash_fn;
 
-    //initialisation des fonctions par defaut
-    hashmap->compare_fn = default_compare_fn;
-    hashmap->key_destroy_fn = default_destroy_fn;
-    hashmap->value_destroy_fn = default_destroy_fn;
-    hashmap->key_alloc_copy_fn = default_alloc_copy_fn;
-    hashmap->value_alloc_copy_fn = default_alloc_copy_fn;
+    hashmap->load_balance_threshold_min = HASHMAP_DEFAULT_LOAD_BALANCE_THRESHOLD_MIN;
+    hashmap->load_balance_threshold_max = HASHMAP_DEFAULT_LOAD_BALANCE_THRESHOLD_MAX;
+
+    //initialisation des fonctions
+    hashmap->fn_hash = hash_fn;
+    hashmap->fn_compare = default_fn_compare;
+    hashmap->fn_destroy_key = default_fn_destroy;
+    hashmap->fn_destroy_value = default_fn_destroy;
+    hashmap->fn_alloc_copy_key = default_fn_alloc_copy;
+    hashmap->fn_alloc_copy_value = default_fn_alloc_copy;
 
     //allocation pour le tableau qui va contenir les donnees
     hashmap->table = calloc(hashmap->capacity, sizeof(*hashmap->table));
@@ -105,12 +111,12 @@ void hashmap_destroy(hashmap_t *hm)
 
 void* hashmap_get(hashmap_t *hm, const void* key)
 {
-    size_t index = hm->hash_fn(key, hm->key_size) % hm->capacity;
+    size_t index = hm->fn_hash(key, hm->key_size) % hm->capacity;
     node_t *current = hm->table[index];
 
     while(current != NULL)
     {
-        if(hm->compare_fn(key, current->key, hm->key_size) == 0)
+        if(hm->fn_compare(key, current->key, hm->key_size) == 0)
             return current->value;
 
         current = current->next;
@@ -131,7 +137,7 @@ void* hashmap_add(hashmap_t *hm, const void* key, const void* value)
     auto_grow(hm);
 
     //on ajoute l'element
-    size_t index = hm->hash_fn(key, hm->key_size) % hm->capacity;
+    size_t index = hm->fn_hash(key, hm->key_size) % hm->capacity;
     node_t *node = node_create(hm, key, value);
     if(node == NULL) return (hm->count--, NULL);//decrement count (mais pas besoin de shrink)
 
@@ -145,13 +151,13 @@ void* hashmap_add(hashmap_t *hm, const void* key, const void* value)
 
 bool hashmap_remove(hashmap_t *hm, const void *key)
 {
-    size_t index = hm->hash_fn(key, hm->key_size) % hm->capacity;
+    size_t index = hm->fn_hash(key, hm->key_size) % hm->capacity;
     node_t *current = hm->table[index];
     node_t *prev = NULL;
 
     while(current != NULL)
     {
-        if(hm->compare_fn(key, current->key, hm->key_size) == 0)
+        if(hm->fn_compare(key, current->key, hm->key_size) == 0)
         {
             if(prev != NULL) //si le noeud n'est pas le premier de la liste
             {
@@ -217,26 +223,32 @@ size_t hashmap_count(hashmap_t *hm)
 size_t hashmap_capacity(hashmap_t *hm)
 { return hm->capacity; }
 
-void hashmap_set_compare_fn(hashmap_t *hm, compare_fn_t compare_fn)
-{ hm->compare_fn = compare_fn; }
+void hashmap_set_load_balance_threshold(hashmap_t *hm, float min, float max)
+{
+    hm->load_balance_threshold_min = min;
+    hm->load_balance_threshold_max = max;
+}
 
-void hashmap_set_key_alloc_copy_fn(hashmap_t *hm, alloc_copy_fn_t key_alloc_fn)
-{ hm->key_alloc_copy_fn = key_alloc_fn; }
+void hashmap_set_fn_compare(hashmap_t *hm, compare_fn_t compare_fn)
+{ hm->fn_compare = compare_fn; }
 
-void hashmap_set_value_alloc_copy_fn(hashmap_t *hm, alloc_copy_fn_t value_alloc_fn)
-{ hm->value_alloc_copy_fn = value_alloc_fn; }
+void hashmap_set_fn_alloc_copy_key(hashmap_t *hm, alloc_copy_fn_t key_alloc_fn)
+{ hm->fn_alloc_copy_key = key_alloc_fn; }
 
-void hashmap_set_key_destroy_fn(hashmap_t *hm, destroy_fn_t key_destroy_fn)
-{ hm->key_destroy_fn = key_destroy_fn; }
+void hashmap_set_fn_alloc_copy_value(hashmap_t *hm, alloc_copy_fn_t value_alloc_fn)
+{ hm->fn_alloc_copy_value = value_alloc_fn; }
 
-void hashmap_set_value_destroy_fn(hashmap_t *hm, destroy_fn_t value_destroy_fn)
-{ hm->value_destroy_fn = value_destroy_fn; }
+void hashmap_set_fn_destroy_key(hashmap_t *hm, destroy_fn_t key_destroy_fn)
+{ hm->fn_destroy_key = key_destroy_fn; }
+
+void hashmap_set_fn_destroy_value(hashmap_t *hm, destroy_fn_t value_destroy_fn)
+{ hm->fn_destroy_value = value_destroy_fn; }
 
 
 static void auto_grow(hashmap_t *hm)
 {
     //si le load balance est trop elevé on resize
-    if(((float)hm->count / hm->capacity) > max_load_balance_threshold)
+    if(((float)hm->count / hm->capacity) > hm->load_balance_threshold_max)
     {
         size_t new_capacity = get_auto_growth_new_capacity(hm);
         resize(hm, new_capacity);
@@ -246,7 +258,7 @@ static void auto_grow(hashmap_t *hm)
 static void auto_shrink(hashmap_t *hm)
 {
     //si le load balance est trop bas on resize
-    if(((float)hm->count / hm->capacity) < min_load_balance_threshold)
+    if(((float)hm->count / hm->capacity) < hm->load_balance_threshold_min)
     {
         size_t new_capacity = get_auto_shrink_new_capacity(hm);
         resize(hm, new_capacity);
@@ -255,7 +267,7 @@ static void auto_shrink(hashmap_t *hm)
 
 static void resize(hashmap_t *hm, size_t new_capacity)
 {
-    if(new_capacity < minimal_capacity) new_capacity = minimal_capacity;
+    if(new_capacity < HASHMAP_MINIMAL_CAPACITY) new_capacity = HASHMAP_MINIMAL_CAPACITY;
 
     //allocation pour le nouveau tableau
     node_t **new_table = calloc(new_capacity, sizeof(*new_table));
@@ -268,7 +280,7 @@ static void resize(hashmap_t *hm, size_t new_capacity)
         node_t *current = hm->table[i];
         while(current != NULL)
         {
-            size_t index = hm->hash_fn(current->key, hm->key_size) % new_capacity;
+            size_t index = hm->fn_hash(current->key, hm->key_size) % new_capacity;
             node_t *next = current->next;
 
             current->next = new_table[index];
@@ -283,10 +295,10 @@ static void resize(hashmap_t *hm, size_t new_capacity)
     hm->capacity = new_capacity;
 }
 
-static void* default_alloc_copy_fn(const void *element, const size_t size)
+static void* default_fn_alloc_copy(const void *element, const size_t size)
 {
     void *copy = malloc(size);
-    if(!copy) return (perror("malloc"), NULL);
+    if(!copy) return NULL;
 
     memcpy(copy, element, size);
     return copy;
@@ -299,12 +311,12 @@ static node_t* node_create(const hashmap_t *hm, const void *key, const void *val
     if(!node) return (perror("malloc"), NULL);
 
     //allocation pour la clef
-    node->key = hm->key_alloc_copy_fn(key, hm->key_size);
-    if(!node->key) return (free(node), NULL);
+    node->key = hm->fn_alloc_copy_key(key, hm->key_size);
+    if(!node->key) return (perror("hashmap_key_alloc_cpy"), free(node), NULL);
 
     //allocation pour la valeur
-    node->value = hm->value_alloc_copy_fn(value, hm->value_size);
-    if(!node->value) return (hm->key_destroy_fn(node->key), free(node), NULL);
+    node->value = hm->fn_alloc_copy_value(value, hm->value_size);
+    if(!node->value) return (perror("hashmap_value_alloc_cpy"), hm->fn_destroy_key(node->key), free(node), NULL);
 
     node->next = NULL;
     return node;
@@ -312,16 +324,17 @@ static node_t* node_create(const hashmap_t *hm, const void *key, const void *val
 
 static inline void node_destroy(const hashmap_t *hm, node_t *node)
 {
-    hm->key_destroy_fn(node->key);
-    hm->value_destroy_fn(node->value);
+    hm->fn_destroy_key(node->key);
+    hm->fn_destroy_value(node->value);
     free(node);
 }
 
 //--------------- HASH FUNCTIONS ---------------//
 //source for djb2 and sdbm: http://www.cse.yorku.ca/~oz/hash.html
 
-size_t hashmap_hash_func_djb2(const void* key, const size_t size)
+size_t hashmap_fn_hash_djb2(const void* key, const size_t size)
 {
+    (void)size;//unused - to avoid warning
     char *str = (char*)key;
     size_t hash = 5381;
 
@@ -331,8 +344,9 @@ size_t hashmap_hash_func_djb2(const void* key, const size_t size)
     return hash;
 }
 
-size_t hashmap_hash_func_sdbm(const void* key, const size_t size)
+size_t hashmap_fn_hash_sdbm(const void* key, const size_t size)
 {
+    (void)size;//unused - to avoid warning
     char *str = (char*)key;
     size_t hash = 0;
 
@@ -342,7 +356,27 @@ size_t hashmap_hash_func_sdbm(const void* key, const size_t size)
     return hash;
 }
 
-size_t hashmap_hash_func_id(const void* key, const size_t size)
+size_t hashmap_fn_hash_id(const void* key, const size_t size)
 {
+    (void)size;//unused - to avoid warning
     return *(size_t*)key;
+}
+
+//--------------- STRING FUNCTIONS ---------------//
+
+void hashmap_fn_print_str(const void *element)
+{
+    printf("\"%s\"", (char*)element);
+}
+
+int hashmap_fn_compare_str(const void *a, const void *b, const size_t size)
+{
+    (void)size;//unused - to avoid warning
+    return strcmp((char*)a, (char*)b);
+}
+
+void* hashmap_fn_alloc_copy_str(const void *element, const size_t size)
+{
+    (void)size;//unused - to avoid warning
+    return strdup((char*)element);
 }
